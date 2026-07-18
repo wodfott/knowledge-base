@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(///wsl.localhost/Ubuntu-24.04/home/wodfoot/**)",
+      "Bash(/c/Users/34973/AppData/Local/Programs/Python/Python312/python.exe -c ' *)"
+    ]
+  }
+}
