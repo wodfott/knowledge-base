@@ -105,3 +105,45 @@ async def api_graph_search(q: str = "", limit: int = 10):
             for r in results
         ],
     }
+
+
+@router.get("/full")
+async def api_graph_full(limit: int = 5000):
+    """Return all entities and relations for full graph overview."""
+    all_entities = graph_db.get_all_entities()
+    all_relations = graph_db.get_all_relations()
+
+    # Build node list
+    nodes = []
+    seen = set()
+    for e in all_entities[:limit]:
+        if e["id"] not in seen:
+            seen.add(e["id"])
+            nodes.append({
+                "id": e["id"],
+                "name": e.get("name", ""),
+                "type": e.get("type", "Other"),
+                "description": e.get("description", ""),
+            })
+
+    # Build link list
+    links = []
+    for r in all_relations:
+        if r["source"] in seen and r["target"] in seen:
+            links.append({
+                "source": r["source"],
+                "target": r["target"],
+                "type": r.get("type", "related_to"),
+                "confidence": r.get("confidence", 1.0),
+            })
+
+    return {
+        "nodes": nodes,
+        "links": links[:500],
+        "counts": {
+            "total_entities": len(all_entities),
+            "total_relations": len(all_relations),
+            "shown_entities": len(nodes),
+            "shown_relations": len(links[:limit]),
+        },
+    }

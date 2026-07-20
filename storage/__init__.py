@@ -16,11 +16,15 @@ class SQLiteDB:
         self.db_path = db_path or settings.sqlite_path
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         self._init_tables()
+        self._migrate()
 
     def _get_conn(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=10)
         conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+        except sqlite3.OperationalError:
+            pass  # WAL not supported on this filesystem, use default
         return conn
 
     def _init_tables(self):
@@ -34,7 +38,7 @@ class SQLiteDB:
                     source_url TEXT,
                     author TEXT,
                     tags TEXT DEFAULT '[]',
-                    simhash INTEGER DEFAULT 0,
+                    simhash TEXT DEFAULT '0',
                     collected_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     metadata TEXT DEFAULT '{}'
@@ -98,6 +102,10 @@ class SQLiteDB:
                     last_reviewed TEXT,
                     next_review TEXT NOT NULL,
                     created_at TEXT NOT NULL,
+                    question TEXT DEFAULT '',
+                    answer TEXT DEFAULT '',
+                    hint TEXT DEFAULT '',
+                    metadata TEXT DEFAULT '{}',
                     FOREIGN KEY (entity_id) REFERENCES entities(id)
                 );
 
@@ -119,6 +127,21 @@ class SQLiteDB:
                 CREATE INDEX IF NOT EXISTS idx_reviews_next ON review_records(next_review);
             """)
 
+    def _migrate(self):
+        """Add columns missing from older schema versions."""
+        migrations = [
+            "ALTER TABLE review_records ADD COLUMN question TEXT DEFAULT ''",
+            "ALTER TABLE review_records ADD COLUMN answer TEXT DEFAULT ''",
+            "ALTER TABLE review_records ADD COLUMN hint TEXT DEFAULT ''",
+            "ALTER TABLE review_records ADD COLUMN metadata TEXT DEFAULT '{}'",
+        ]
+        with self._get_conn() as conn:
+            for sql in migrations:
+                try:
+                    conn.execute(sql)
+                except sqlite3.OperationalError:
+                    pass  # Column already exists
+
     # --- Document operations ---
     def insert_document(self, doc: dict) -> None:
         with self._get_conn() as conn:
@@ -130,7 +153,7 @@ class SQLiteDB:
                     doc["id"], doc["title"], doc["content"], doc["source_type"],
                     doc.get("source_url"), doc.get("author"),
                     json.dumps(doc.get("tags", [])),
-                    doc.get("simhash", 0),
+                    str(doc.get("simhash", 0)),
                     doc.get("collected_at", datetime.now().isoformat()),
                     doc.get("updated_at", datetime.now().isoformat()),
                     json.dumps(doc.get("metadata", {}), ensure_ascii=False),
@@ -171,16 +194,89 @@ class SQLiteDB:
         """Find documents with similar SimHash (pre-filter in SQL, exact check in Python)."""
         # We retrieve all and compute in Python (simhash XOR can't be indexed easily in SQLite)
         with self._get_conn() as conn:
-            rows = conn.execute("SELECT id, simhash FROM documents WHERE simhash > 0").fetchall()
+            rows = conn.execute("SELECT id, simhash FROM documents WHERE simhash != '0'").fetchall()
 
         from utils import simhash_similarity
         similar = []
         for row in rows:
-            if simhash_similarity(simhash, row["simhash"]) >= threshold:
+            try:
+                doc_hash = int(row["simhash"])
+            except (ValueError, TypeError):
+                continue
+            if simhash_similarity(simhash, doc_hash) >= threshold:
                 doc = self.get_document(row["id"])
                 if doc:
                     similar.append(doc)
         return similar
+
+    def delete_document(self, doc_id: str) -> bool:
+        """Delete a document and its chunks from SQLite."""
+        with self._get_conn() as conn:
+            conn.execute("DELETE FROM document_chunks WHERE doc_id = ?", (doc_id,))
+            conn.execute("DELETE FROM documents WHERE id = ?", (doc_id,))
+            return conn.total_changes > 0
+
+    def update_document(self, doc_id: str, title: str = "", content: str = "") -> bool:
+        """Update document title and/or content."""
+        with self._get_conn() as conn:
+            updates = []
+            params = []
+            if title:
+                updates.append("title = ?")
+                params.append(title)
+            if content:
+                updates.append("content = ?")
+                params.append(content)
+            if not updates:
+                return False
+            updates.append("updated_at = ?")
+            params.append(datetime.now().isoformat())
+            params.append(doc_id)
+            conn.execute(f"UPDATE documents SET {', '.join(updates)} WHERE id = ?", params)
+            return conn.total_changes > 0
+
+    def delete_entities_for_doc(self, doc_id: str) -> int:
+        """Remove entity-doc associations and orphaned entities. Returns deleted count."""
+        import json as _json
+        deleted = 0
+        entities = self.list_entities(limit=50000)
+        for ent in entities:
+            sds = ent.get("source_doc_ids", [])
+            if isinstance(sds, str):
+                try:
+                    sds = _json.loads(sds)
+                except (_json.JSONDecodeError, TypeError):
+                    sds = []
+            if doc_id in sds:
+                sds.remove(doc_id)
+                ent["source_doc_ids"] = sds
+                # Remove from graph DB
+                from storage.graph_db import graph_db
+                if graph_db.has_entity(ent["id"]):
+                    graph_db.add_entity(
+                        entity_id=ent["id"], name=ent["name"],
+                        entity_type=ent.get("type", "Other"),
+                        description=ent.get("description", ""),
+                        confidence=ent.get("confidence", 1.0),
+                        source_doc_ids=sds,
+                    )
+                # If no more source docs, delete the entity (SQLite + Graph)
+                if not sds:
+                    self.delete_entity(ent["id"])
+                    graph_db.remove_entity(ent["id"])
+                    deleted += 1
+                else:
+                    self.insert_entity(ent)
+        return deleted
+
+    def delete_entity(self, entity_id: str):
+        """Delete an entity from SQLite."""
+        with self._get_conn() as conn:
+            conn.execute("DELETE FROM relations WHERE source_entity_id = ? OR target_entity_id = ?",
+                         (entity_id, entity_id))
+            conn.execute("DELETE FROM review_records WHERE entity_id = ?", (entity_id,))
+            conn.execute("DELETE FROM annotations WHERE target_id = ?", (entity_id,))
+            conn.execute("DELETE FROM entities WHERE id = ?", (entity_id,))
 
     def count_documents(self, source_type: Optional[str] = None) -> int:
         with self._get_conn() as conn:
@@ -244,8 +340,16 @@ class SQLiteDB:
         return None
 
     def find_entity_by_name(self, name: str) -> Optional[dict]:
+        name = name.strip()
         with self._get_conn() as conn:
+            # Exact match first
             row = conn.execute("SELECT * FROM entities WHERE name = ?", (name,)).fetchone()
+            # Partial match fallback
+            if not row:
+                row = conn.execute(
+                    "SELECT * FROM entities WHERE name LIKE ? LIMIT 1",
+                    (f"%{name}%",)
+                ).fetchone()
             if row:
                 d = dict(row)
                 d["aliases"] = json.loads(d["aliases"])
@@ -338,14 +442,18 @@ class SQLiteDB:
         with self._get_conn() as conn:
             conn.execute(
                 """INSERT OR REPLACE INTO review_records
-                (id, entity_id, ease, interval_days, repetitions, last_reviewed, next_review, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (id, entity_id, ease, interval_days, repetitions, last_reviewed, next_review, created_at, question, answer, hint, metadata)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     review["id"], review["entity_id"],
                     review.get("ease", 2.5), review.get("interval_days", 1),
                     review.get("repetitions", 0),
                     review.get("last_reviewed"), review["next_review"],
                     review.get("created_at", datetime.now().isoformat()),
+                    review.get("question", ""),
+                    review.get("answer", ""),
+                    review.get("hint", ""),
+                    json.dumps(review.get("metadata", {}), ensure_ascii=False),
                 ),
             )
 

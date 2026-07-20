@@ -35,6 +35,16 @@ async def handle_message_event(event: dict) -> dict:
     except json.JSONDecodeError:
         content = {}
 
+    # Log every incoming message
+    logger.info(f"[MSG IN] type={msg_type} keys={list(content.keys())} "
+                f"has_text={'text' in content} has_file={'file_key' in content} "
+                f"text_preview={str(content.get('text',''))[:60]}")
+
+    # --- Handle file/image/media messages ---
+    if msg_type in ("file", "image", "media") or "file_key" in content:
+        logger.info(f">>> File handler triggered: type={msg_type}, file_key={content.get('file_key','')[:30]}")
+        return await _handle_file_message(content, message_id, msg_type)
+
     text = content.get("text", "").strip()
 
     if not text:
@@ -44,8 +54,29 @@ async def handle_message_event(event: dict) -> dict:
     if text.startswith("/"):
         return await _handle_command(text, sender_id, message_id)
 
-    # Default: treat as entity query
-    return await _handle_entity_query(text, sender_id, message_id)
+    # --- Natural language routing ---
+    logger.info(f"Message routing: text='{text[:60]}' msg_type={msg_type}")
+
+    # If it looks like a question → QA
+    question_markers = ("?", "？", "吗", "呢", "什么", "怎么", "如何", "为什么", "哪个", "多少",
+                        "what", "how", "why", "which", "who", "when", "where")
+    if any(m in text for m in question_markers):
+        logger.info(f"→ QA (question marker detected)")
+        return await _handle_qa(text, sender_id, message_id)
+
+    # If it contains a URL → collect
+    if "http" in text:
+        return await _handle_collect_url(text, sender_id, message_id)
+
+    # If short and looks like a single entity name → try entity query first
+    # Otherwise → go straight to QA
+    entity_result = generate_entity_card(text)
+    if entity_result["found"]:
+        return await _handle_entity_query(text, sender_id, message_id)
+
+    # Entity not found → QA
+    logger.info(f"→ Entity not found, fallback to QA")
+    return await _handle_qa(text, sender_id, message_id)
 
 
 async def _handle_command(text: str, sender_id: str, message_id: str) -> dict:
@@ -72,6 +103,15 @@ async def _handle_command(text: str, sender_id: str, message_id: str) -> dict:
     elif cmd == "/review" or cmd == "/复习":
         return await _handle_review(sender_id, message_id)
 
+    elif cmd == "/flashcard" or cmd == "/闪卡":
+        return await _handle_flashcard_create(arg, sender_id, message_id)
+
+    elif cmd == "/stale" or cmd == "/过期":
+        return await _handle_stale(sender_id, message_id)
+
+    elif cmd == "/rec" or cmd == "/推荐":
+        return await _handle_recommend(arg, sender_id, message_id)
+
     elif cmd == "/help" or cmd == "/帮助":
         help_text = (
             "📚 **知识管理助手**\n\n"
@@ -82,6 +122,9 @@ async def _handle_command(text: str, sender_id: str, message_id: str) -> dict:
             "• `/rss URL` - 订阅RSS\n"
             "• `/recap [7d|30d|90d]` - 知识周报\n"
             "• `/review` - 今日复习\n"
+            "• `/flashcard 实体名` - 创建闪卡\n"
+            "• `/stale` - 查看过期知识\n"
+            "• `/rec 实体名` - 相似推荐\n"
             "• `/help` - 帮助\n\n"
             "**直接发消息:** 自动识别为实体查询或问答"
         )
@@ -121,22 +164,32 @@ async def _handle_entity_query(entity_name: str, sender_id: str, message_id: str
     if summary:
         bot.reply_text(message_id, summary[:500])
 
+    # Follow-up: recommend similar entities
+    _send_recommendations(entity_name, [], message_id)
+
     return {"status": "ok", "entity": result["entity"]["name"]}
 
 
 async def _handle_qa(question: str, sender_id: str, message_id: str) -> dict:
-    """Answer a question via RAG."""
+    """Answer a question via RAG, with follow-up recommendations."""
     if not question:
         bot.reply_text(message_id, "请输入问题，例如: /ask OpenClaw是什么？")
         return {"status": "error", "message": "empty question"}
 
+    logger.info(f"QA query: {question[:60]}")
     result = answer(question)
+    logger.info(f"QA result: sources={len(result.get('sources',[]))}, cached={result.get('cached')}, answer_len={len(result.get('answer',''))}")
+
     card = qa_card(
         question=question,
         answer=result["answer"],
         sources=result["sources"],
     )
     bot.reply_card(message_id, card)
+
+    # Follow-up: recommend related entities from sources
+    _send_recommendations(question, result.get("sources", []), message_id)
+
     return {"status": "ok"}
 
 
@@ -226,7 +279,7 @@ async def _handle_recap(period: str, sender_id: str, message_id: str) -> dict:
 
 
 async def _handle_review(sender_id: str, message_id: str) -> dict:
-    """Get today's review list."""
+    """Get today's review list with Anki-style cards."""
     reviews = db.get_due_reviews()
     if not reviews:
         bot.reply_text(message_id, "🎉 今日无待复习内容！")
@@ -236,19 +289,197 @@ async def _handle_review(sender_id: str, message_id: str) -> dict:
     for review in reviews[:5]:
         entity = db.get_entity(review["entity_id"])
         if entity:
-            relations_data = db.get_relations_for_entity(entity["id"])
-            relation_strs = [
-                f"{r['relation_type']}: {_get_entity_name(r['source_entity_id'])} → {_get_entity_name(r['target_entity_id'])}"
-                for r in relations_data[:3]
-            ]
             card = review_card(
                 entity_name=entity["name"],
-                relations=relation_strs,
-                related_docs=[did for did in entity.get("source_doc_ids", [])[:3]],
+                question=review.get("question", ""),
+                answer=review.get("answer", ""),
+                hint=review.get("hint", ""),
+                entity_type=entity.get("type", ""),
+                interval_days=review.get("interval_days", 1),
+                repetitions=review.get("repetitions", 0),
             )
             bot.send_card(sender_id, card)
 
     return {"status": "ok", "count": len(reviews)}
+
+
+async def _handle_flashcard_create(entity_name: str, sender_id: str, message_id: str) -> dict:
+    """Create a flashcard for an entity, with fuzzy search fallback."""
+    if not entity_name:
+        bot.reply_text(message_id, "请输入实体名称，例如: /flashcard Python")
+        return {"status": "error", "message": "empty name"}
+
+    from agents.personal import create_flashcard
+
+    result = create_flashcard(entity_name)
+
+    if result["status"] == "error":
+        # Try fuzzy search for suggestions
+        candidates = graph_db.search_entities(entity_name, max_results=5)
+        if candidates:
+            names = "、".join(c["name"] for c in candidates[:5])
+            bot.reply_text(message_id,
+                f"❌ 未找到实体「{entity_name}」\n\n"
+                f"💡 相似实体: {names}\n\n"
+                f"请用完整名称重试: /flashcard 实体名")
+        else:
+            bot.reply_text(message_id, f"❌ 知识库中没有「{entity_name}」相关实体")
+        return result
+
+    if result["status"] == "duplicate":
+        bot.reply_text(message_id, f"⚠️ {result['message']}")
+        return result
+
+    # Success
+    entity = graph_db.find_entity_by_name(entity_name)
+    type_info = f"[{entity['type']}]" if entity and entity.get('type') else ""
+    bot.reply_text(message_id,
+        f"✅ 已创建闪卡!\n\n"
+        f"📚 实体: {entity_name} {type_info}\n"
+        f"📅 下次复习: 明天\n"
+        f"🔄 重复次数: 0\n\n"
+        f"发送 /review 查看今日复习列表")
+    return result
+
+
+async def _handle_stale(sender_id: str, message_id: str) -> dict:
+    """Show stale entities (not accessed for 90+ days)."""
+    from agents.lifecycle import check_stale_entities
+    stale = check_stale_entities(days_threshold=90)
+
+    if not stale:
+        bot.reply_text(message_id, "🌱 所有知识都很新鲜！暂无过期实体。")
+        return {"status": "ok", "count": 0}
+
+    lines = [f"🕰️ **知识保鲜预警** (90天未访问)\n"]
+    for s in stale[:10]:
+        emoji = "🔴" if s["days_stale"] > 180 else ("🟠" if s["days_stale"] > 120 else "🟡")
+        lines.append(f"{emoji} **{s['name']}** [{s['type']}] — {s['days_stale']}天")
+    lines.append(f"\n共 {len(stale)} 个过期实体，发送 /query 实体名 来重新回顾")
+
+    bot.reply_text(message_id, "\n".join(lines))
+    return {"status": "ok", "count": len(stale)}
+
+
+async def _handle_recommend(entity_name: str, sender_id: str, message_id: str) -> dict:
+    """Recommend similar entities."""
+    if not entity_name:
+        bot.reply_text(message_id, "请输入实体名称，例如: /rec Python")
+        return {"status": "error"}
+
+    from agents.recommend import recommend_similar, recommend_learning_path
+    similar = recommend_similar(entity_name, top_k=5)
+    path = recommend_learning_path(entity_name, max_depth=2)
+
+    if not similar and not path:
+        bot.reply_text(message_id, f"未找到与「{entity_name}」相似的实体")
+        return {"status": "ok"}
+
+    lines = [f"💡 **「{entity_name}」探索推荐**\n"]
+    if similar:
+        lines.append("**相似实体:**")
+        for s in similar:
+            lines.append(f"• {s['name']} [{s['type']}] — 相似度 {s['similarity']:.0%}")
+    if path:
+        lines.append(f"\n**学习路径:**")
+        for p in path[:5]:
+            arrow = "→" if p.get("direction") == "outgoing" else "←"
+            lines.append(f"{arrow} {p['name']} [{p['type']}] — {p.get('relation', '')}")
+
+    bot.reply_text(message_id, "\n".join(lines))
+    return {"status": "ok"}
+
+
+def _send_recommendations(query: str, sources: list[dict], message_id: str):
+    """Send follow-up recommendations based on query and sources."""
+    # Extract entity names from source titles
+    source_titles = [s.get("title", "") for s in sources[:3] if s.get("title")]
+    # Also try to find entities mentioned in source content
+    candidates = set()
+    for s in sources[:3]:
+        content_text = s.get("content", "")[:300]
+        # Quick entity extraction: find named entities from graph via search
+        from storage.graph_db import graph_db
+        # Search for keywords in the query
+        words = query.replace("？", "").replace("?", "").replace("的", " ").replace("是", " ").split()
+        for w in words[:5]:
+            if len(w) >= 2:
+                entities = graph_db.search_entities(w, max_results=3)
+                for e in entities:
+                    if e.get("name") and e["name"] not in candidates:
+                        candidates.add(e["name"])
+
+    if not candidates:
+        return
+
+    rec_list = list(candidates)[:5]
+    from agents.recommend import recommend_similar as rec_similar
+    expanded = []
+    for name in rec_list[:2]:
+        try:
+            similar = rec_similar(name, top_k=3)
+            for s in similar:
+                expanded.append(f"• {s['name']} [{s.get('type', '')}] — 相似度 {s['similarity']:.0%}")
+        except Exception:
+            pass
+
+    lines = ["💡 **相关推荐**"]
+    if expanded:
+        lines.extend(expanded[:5])
+    else:
+        lines.extend([f"• {n}" for n in rec_list[:5]])
+    lines.append("\n发送 /query 实体名 深入了解")
+
+    bot.reply_text(message_id, "\n".join(lines))
+
+
+async def _handle_file_message(content: dict, message_id: str, msg_type: str = "file") -> dict:
+    """Handle file/image message: download, extract text, store, reply with RAW content — no LLM."""
+    file_key = content.get("file_key", "")
+    # file_name might be in content or we derive it later
+    file_name = content.get("file_name", "")
+
+    if not file_key:
+        bot.reply_text(message_id, "❌ 未找到文件，请确认已正确上传")
+        return {"status": "error", "message": "no file_key"}
+
+    if not file_name:
+        file_name = f"feishu_file_{file_key[:8]}"
+
+    bot.reply_text(message_id, f"📥 正在读取: {file_name} ...")
+
+    result = bot.download_file(message_id, file_key, file_name)
+    logger.info(f"File download result: status={result.get('status')}, name={file_name}, size={result.get('size',0)}")
+
+    if result["status"] != "ok":
+        bot.reply_text(message_id, f"❌ 读取失败: {result.get('message', '未知错误')}\n支持格式: txt, md, docx, pdf, py, js, json, csv")
+        return result
+
+    text_content = result["content"]
+    title = file_name.rsplit(".", 1)[0] if "." in file_name else file_name
+
+    # Store as document (no LLM processing in reply)
+    from agents.collector import collect_text
+    collect_result = collect_text(
+        title=title,
+        text=text_content,
+        source_type="feishu_file",
+        source_url=f"feishu://file/{file_key}",
+    )
+
+    if collect_result["status"] == "created":
+        # Auto-process in background (entity extraction, indexing)
+        from agents.knowledge import process_and_index_document
+        process_and_index_document(collect_result["id"])
+
+    # ALWAYS reply with raw content — never LLM
+    reply = f"📄 **{title}**\n\n{text_content}"
+    if len(reply) > 5000:
+        reply = reply[:4900] + "\n\n... (内容过长已截断，全文已存入知识库)"
+    bot.reply_text(message_id, reply)
+
+    return {"status": "ok", "doc_id": collect_result.get("id", ""),
+            "title": title, "size": result.get("size", 0)}
 
 
 def _get_entity_name(entity_id: str) -> str:

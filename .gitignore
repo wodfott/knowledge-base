@@ -27,3 +27,11 @@ data/
 .DS_Store
 Thumbs.db
 *.tmp
+
+# Claude
+.claude/
+.openclaw/
+
+# Scripts
+seed_notes.py
+fix_graph.py

@@ -123,10 +123,9 @@ def process_document(doc_id: str) -> dict:
         return {"status": "error", "message": str(e)}
 
 
-def chunk_and_embed_document(doc_id: str) -> dict:
-    """Chunk a document and generate embeddings for vector search."""
-    from utils.embedding import embedding_client
-    from storage.vector_db import vector_db
+def chunk_and_index_document(doc_id: str) -> dict:
+    """Chunk a document and index with BM25 for keyword search."""
+    from utils.retriever import bm25_retriever
 
     doc = db.get_document(doc_id)
     if not doc:
@@ -135,7 +134,6 @@ def chunk_and_embed_document(doc_id: str) -> dict:
     try:
         chunks = chunk_text(doc["content"], chunk_size=500, overlap=50)
         chunk_records = []
-        embed_inputs = []
 
         for i, chunk_text_content in enumerate(chunks):
             chunk_id = f"{doc_id}_chunk_{i}"
@@ -147,21 +145,18 @@ def chunk_and_embed_document(doc_id: str) -> dict:
                 "title": doc["title"],
                 "token_count": len(chunk_text_content),
             })
-            embed_inputs.append(chunk_text_content)
-
-        # Generate embeddings in batch
-        embeddings = embedding_client.embed(embed_inputs)
 
         # Save chunks to SQLite
         db.insert_chunks(chunk_records)
 
-        # Save embeddings to LanceDB
-        vector_db.add(chunk_records, embeddings)
+        # Add to BM25 index
+        bm25_retriever.add(chunk_records)
+        logger.info(f"Indexed {len(chunks)} chunks for doc {doc_id}, BM25 total: {bm25_retriever.count()}")
 
         return {"status": "ok", "doc_id": doc_id, "chunks_count": len(chunks)}
 
     except Exception as e:
-        logger.error(f"Chunk/embed failed for doc {doc_id}: {e}")
+        logger.error(f"Chunk/index failed for doc {doc_id}: {e}")
         return {"status": "error", "message": str(e)}
 
 
@@ -174,8 +169,8 @@ def process_and_index_document(doc_id: str) -> dict:
     if knowledge_result["status"] != "ok":
         return knowledge_result
 
-    # Step 2: Chunk and embed
-    embed_result = chunk_and_embed_document(doc_id)
+    # Step 2: Chunk and index with BM25
+    index_result = chunk_and_index_document(doc_id)
 
     return {
         "status": "ok",
@@ -185,6 +180,6 @@ def process_and_index_document(doc_id: str) -> dict:
             "relations": knowledge_result["relations_count"],
         },
         "indexing": {
-            "chunks": embed_result.get("chunks_count", 0),
+            "chunks": index_result.get("chunks_count", 0),
         },
     }

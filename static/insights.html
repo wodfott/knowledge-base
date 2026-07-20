@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>数据洞察 — 知识管理</title>
+<style>
+  *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+  :root {
+    --primary: hsl(162, 45%, 32%); --primary-light: hsl(162, 45%, 42%);
+    --primary-soft: hsl(162, 45%, 95%); --primary-pale: hsl(162, 40%, 88%);
+    --grad-start: hsl(162, 58%, 41%); --grad-end: hsl(162, 42%, 26%);
+    --bg: hsl(195, 20%, 96%); --bg-alt: hsl(195, 18%, 93%);
+    --card: hsl(0, 0%, 100%); --border: hsl(195, 15%, 87%);
+    --text: hsl(195, 20%, 14%); --text-secondary: hsl(195, 12%, 44%);
+    --text-muted: hsl(195, 10%, 62%);
+    --orange: hsl(24, 95%, 53%); --orange-soft: hsl(24, 95%, 93%);
+    --red: hsl(0, 72%, 52%); --blue: hsl(210, 80%, 54%); --purple: hsl(270, 60%, 55%);
+    --amber: hsl(38, 92%, 50%);
+    --radius: 14px; --radius-sm: 10px;
+    --shadow: 0 1px 3px hsl(195 15% 75%/0.2), 0 4px 16px hsl(195 10% 60%/0.06);
+    --transition: 0.2s ease;
+  }
+  html { font-size: 15px; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg); color: var(--text); -webkit-font-smoothing: antialiased;
+  }
+  .header {
+    background: linear-gradient(135deg, var(--grad-start), var(--grad-end));
+    color: #fff; padding: 0; position: sticky; top: 0; z-index: 100;
+    box-shadow: 0 2px 16px hsl(162 45% 20%/0.2);
+  }
+  .header-inner {
+    display: flex; align-items: center; justify-content: space-between;
+    height: 52px; max-width: 1200px; margin: 0 auto; padding: 0 24px;
+  }
+  .header h1 { font-size: 1rem; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+  .header-actions { display: flex; gap: 8px; }
+  .h-btn {
+    background: hsl(0 0% 100%/0.12); border: 1px solid hsl(0 0% 100%/0.18);
+    color: #fff; padding: 5px 14px; border-radius: 7px; cursor: pointer;
+    font-size: 0.78rem; font-weight: 500; transition: var(--transition); text-decoration: none;
+  }
+  .h-btn:hover { background: hsl(0 0% 100%/0.22); }
+  .container { max-width: 1200px; margin: 0 auto; padding: 24px 24px 48px; }
+
+  .stats-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 20px; }
+  @media (max-width: 768px) { .stats-row { grid-template-columns: repeat(2,1fr); } }
+  .stat-card {
+    background: var(--card); border-radius: var(--radius); padding: 18px 20px;
+    box-shadow: var(--shadow); border: 1px solid var(--border); position: relative; overflow: hidden;
+  }
+  .stat-icon { font-size: 1.2rem; margin-bottom: 8px; }
+  .stat-label { font-size: 0.78rem; color: var(--text-secondary); font-weight: 500; }
+  .stat-number {
+    font-size: 2rem; font-weight: 800; letter-spacing: -0.5px;
+    background: linear-gradient(135deg, var(--grad-start), var(--grad-end));
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+  }
+  .stat-card.reviews .stat-number {
+    background: linear-gradient(135deg, var(--orange), hsl(24, 85%, 42%));
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+  }
+  .stat-sub { font-size: 0.72rem; color: var(--text-muted); margin-top: 2px; }
+  .badge-dot {
+    position: absolute; top: 14px; right: 14px; width: 10px; height: 10px;
+    border-radius: 50%; background: var(--orange); box-shadow: 0 0 0 4px var(--orange-soft);
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse { 0%,100%{ box-shadow:0 0 0 4px var(--orange-soft); } 50%{ box-shadow:0 0 0 8px var(--orange-soft); } }
+
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
+  @media (max-width: 768px) { .grid-2 { grid-template-columns: 1fr; } }
+  .panel {
+    background: var(--card); border-radius: var(--radius);
+    box-shadow: var(--shadow); border: 1px solid var(--border); overflow: hidden;
+  }
+  .panel-hd {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 18px; border-bottom: 1px solid var(--border); background: var(--card);
+  }
+  .panel-hd h3 { font-size: 0.9rem; font-weight: 700; }
+  .panel-bd { padding: 12px 18px; }
+  .panel-bd.no-pad { padding: 0; }
+
+  .bar-item { display: flex; align-items: center; gap: 10px; padding: 7px 0; }
+  .bar-item+.bar-item { border-top: 1px solid hsl(195,15%,90%); }
+  .bar-label { width: 90px; font-size: 0.78rem; font-weight: 600; text-align: right; color: var(--text-secondary); flex-shrink: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bar-track { flex:1; height: 8px; background: var(--bg-alt); border-radius: 8px; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 8px; background: linear-gradient(90deg, var(--grad-start), var(--primary)); transition: width 0.5s ease; min-width: 2px; }
+  .bar-num { width: 35px; font-size: 0.78rem; font-weight: 700; color: var(--primary); flex-shrink: 0; }
+
+  .tag-cloud { display: flex; flex-wrap: wrap; gap: 8px; }
+  .tag { display: inline-flex; align-items: center; gap: 5px; padding: 6px 14px; border-radius: 18px; font-size: 0.78rem; font-weight: 600; cursor: default; }
+  .tag .tdot { width: 7px; height: 7px; border-radius: 50%; }
+  .tag .tcnt { background: hsl(0 0% 100%/0.5); padding: 1px 7px; border-radius: 8px; font-size: 0.68rem; font-weight: 700; margin-left: 2px; }
+  .t0{background:hsl(162,40%,88%);color:hsl(162,45%,28%)}.t0 .tdot{background:hsl(162,45%,38%)}
+  .t1{background:hsl(210,70%,90%);color:hsl(210,65%,38%)}.t1 .tdot{background:hsl(210,65%,50%)}
+  .t2{background:hsl(270,50%,90%);color:hsl(270,50%,36%)}.t2 .tdot{background:hsl(270,50%,48%)}
+  .t3{background:hsl(340,55%,90%);color:hsl(340,50%,38%)}.t3 .tdot{background:hsl(340,50%,48%)}
+  .t4{background:hsl(38,80%,88%);color:hsl(38,70%,32%)}.t4 .tdot{background:hsl(38,70%,44%)}
+  .t5{background:hsl(190,55%,88%);color:hsl(190,50%,30%)}.t5 .tdot{background:hsl(190,50%,40%)}
+
+  .review-item {
+    display: flex; flex-direction: column; padding: 10px 0; cursor: pointer;
+  }
+  .review-item+.review-item { border-top: 1px solid hsl(195,15%,90%); }
+  .review-head { display: flex; align-items: center; gap: 10px; }
+  .review-badge {
+    font-size: 0.7rem; font-weight: 700; padding: 2px 10px; border-radius: 12px; flex-shrink: 0;
+  }
+  .review-badge.urgent{background:var(--orange-soft);color:var(--orange)}
+  .review-badge.overdue{background:hsl(0,70%,92%);color:var(--red)}
+  .review-name { font-weight: 600; font-size: 0.83rem; flex: 1; }
+  .review-meta { font-size: 0.7rem; color: var(--text-muted); flex-shrink: 0; }
+  .review-qa {
+    display: none; margin-top: 8px; padding: 10px 14px; background: var(--bg-alt);
+    border-radius: 8px; font-size: 0.8rem; line-height: 1.6;
+  }
+  .review-qa .rq { color: var(--primary); font-weight: 700; margin-bottom: 4px; }
+  .review-qa .rh { color: var(--text-muted); font-size: 0.72rem; margin-bottom: 4px; }
+  .review-qa .ra { color: var(--text); padding-top: 6px; border-top: 1px dashed var(--border); }
+
+  .stale-item { display: flex; align-items: center; gap: 8px; padding: 7px 0; font-size: 0.8rem; }
+  .stale-item+.stale-item { border-top: 1px solid hsl(195,15%,90%); }
+  .stale-days {
+    font-weight: 700; font-size: 0.72rem; padding: 2px 9px; border-radius: 10px; flex-shrink: 0; min-width: 55px; text-align: center;
+  }
+  .stale-days.crit{background:hsl(0,70%,92%);color:var(--red)}
+  .stale-days.warn{background:hsl(38,80%,90%);color:var(--amber)}
+  .stale-days.ok{background:hsl(162,40%,90%);color:var(--primary)}
+
+  .rec-card { padding: 10px 14px; margin: 5px 0; border-radius: 10px; background: var(--bg-alt); }
+  .rec-source { font-weight: 700; color: var(--primary); font-size: 0.82rem; }
+  .rec-type { font-size: 0.66rem; color: var(--text-muted); margin-left: 4px; }
+  .rec-similar { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 4px; }
+  .rec-sim {
+    font-size: 0.68rem; padding: 2px 8px; border-radius: 8px;
+    background: var(--card); color: var(--text-secondary); border: 1px solid var(--border);
+  }
+
+  .timeline { display: flex; align-items: flex-end; gap: 3px; height: 80px; padding: 4px 0; }
+  .tbar {
+    flex:1; border-radius: 3px 3px 0 0;
+    background: linear-gradient(180deg, var(--primary), var(--primary-light));
+    min-height: 2px; position: relative; cursor: pointer;
+  }
+  .tbar:hover { filter: brightness(1.15); }
+  .tbar .ttip { position: absolute; top: -18px; left: 50%; transform: translateX(-50%); font-size: 0.6rem; color: var(--text-secondary); white-space: nowrap; opacity: 0; }
+  .tbar:hover .ttip { opacity: 1; }
+
+  .sys-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; }
+  .sys-item { display: flex; align-items: center; gap: 6px; padding: 8px 12px; border-radius: 8px; background: var(--bg-alt); font-size: 0.76rem; }
+  .sys-icon { font-size: 0.9rem; }
+  .sys-label { font-size: 0.65rem; color: var(--text-muted); }
+  .sys-val { font-weight: 600; }
+
+  .empty { text-align: center; padding: 28px 16px; color: var(--text-muted); font-size: 0.82rem; }
+  .loading { text-align: center; padding: 40px; color: var(--text-muted); }
+  .spinner { width: 30px; height: 30px; border: 3px solid var(--border); border-top-color: var(--primary); border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 12px; }
+  @keyframes spin { to{transform:rotate(360deg)} }
+</style>
+</head>
+<body>
+
+<header class="header">
+  <div class="header-inner">
+    <h1>📊 数据洞察</h1>
+    <div class="header-actions">
+      <a href="/admin" class="h-btn">💬 智能问答</a>
+      <a href="/static/graph.html" class="h-btn">🕸️ 知识图谱</a>
+      <button class="h-btn" onclick="loadAll()">🔄 刷新</button>
+    </div>
+  </div>
+</header>
+
+<div class="container">
+  <div class="loading" id="loading"><div class="spinner"></div><p>加载中…</p></div>
+  <div id="content" style="display:none;">
+
+    <!-- Stats -->
+    <div class="stats-row" id="statsRow"></div>
+
+    <!-- Sources + Entity Types -->
+    <div class="grid-2">
+      <div class="panel"><div class="panel-hd"><h3>📊 来源分布</h3></div><div class="panel-bd" id="sourceBars"></div></div>
+      <div class="panel"><div class="panel-hd"><h3>🏷️ 实体类型</h3></div><div class="panel-bd" id="entityTags"></div></div>
+    </div>
+
+    <!-- Reviews + Stale -->
+    <div class="grid-2">
+      <div class="panel"><div class="panel-hd"><h3>🔔 待复习 <span style="color:var(--orange);font-size:0.8rem;" id="dueBadge"></span></h3></div><div class="panel-bd" id="dueReviews"></div></div>
+      <div class="panel"><div class="panel-hd"><h3>🕰️ 知识保鲜 <span style="color:var(--red);font-size:0.8rem;" id="staleBadge"></span></h3></div><div class="panel-bd" id="stalePanel"></div></div>
+    </div>
+
+    <!-- Recommend -->
+    <div class="panel" style="margin-bottom:14px;">
+      <div class="panel-hd"><h3>💡 探索推荐</h3></div>
+      <div class="panel-bd" id="recPanel"></div>
+    </div>
+
+    <!-- Timeline -->
+    <div class="panel" style="margin-bottom:14px;">
+      <div class="panel-hd"><h3>📈 文档采集趋势</h3></div>
+      <div class="panel-bd"><div class="timeline" id="timeline"></div></div>
+    </div>
+
+    <!-- System -->
+    <div class="panel">
+      <div class="panel-hd"><h3>⚙️ 系统信息</h3></div>
+      <div class="panel-bd"><div class="sys-grid" id="sysInfo"></div></div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+const ENTITY_EMOJI = {Person:'👤',Organization:'🏢',Technology:'💻',Concept:'💡',Tool:'🛠️',Framework:'🧩',Language:'🗣️',Platform:'🌐',Product:'📦',Methodology:'📐',Event:'📅',Location:'📍',Other:'📌'};
+const SOURCE_META = {url:{e:'🔗',l:'网页链接',c:'url'},manual:{e:'✍️',l:'手动录入',c:'manual'},feishu_doc:{e:'📑',l:'飞书文档',c:'feishu'},feishu_note:{e:'📝',l:'飞书笔记',c:'feishu'},rss:{e:'📡',l:'RSS',c:'rss'},feishu_file:{e:'📎',l:'飞书文件',c:'file'},obsidian:{e:'💎',l:'Obsidian',c:'obsidian'},file:{e:'📁',l:'文件',c:'file'},web:{e:'🌐',l:'网页',c:'url'}};
+const TAG_COLORS = 6;
+function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+function fmtDate(i){return i?new Date(i).toLocaleDateString('zh-CN',{month:'short',day:'numeric'}):'—'}
+
+async function loadAll(){
+  document.getElementById('content').style.display='none';
+  document.getElementById('loading').style.display='';
+  try{
+    const r=await fetch('/api/admin/dashboard');
+    const d=await r.json();
+    renderStats(d); renderSources(d); renderEntities(d);
+    renderReviews(d); renderStale(d); renderRecs(d);
+    renderTimeline(d); renderSystem(d);
+    document.getElementById('loading').style.display='none';
+    document.getElementById('content').style.display='';
+  }catch(e){
+    document.getElementById('loading').innerHTML='<p style="color:var(--red)">加载失败: '+e.message+'</p>';
+  }
+}
+
+function renderStats(d){
+  const s=d.stats, due=d.due_reviews.count;
+  document.getElementById('statsRow').innerHTML=[
+    {c:'docs',i:'📄',l:'文档总数',n:s.documents,v:Object.keys(d.source_types).length+' 种来源'},
+    {c:'entities',i:'🔖',l:'知识实体',n:s.entities,v:Object.keys(d.entity_types).length+' 种类型'},
+    {c:'relations',i:'🔗',l:'实体关系',n:s.relations,v:'知识图谱连接'},
+    {c:'reviews',i:'🧩',l:'待复习',n:due,v:due>0?'需要关注':'暂无',b:due>0},
+  ].map(c=>`<div class="stat-card ${c.c}">${c.b?'<div class="badge-dot"></div>':''}<div class="stat-icon">${c.i}</div><div class="stat-label">${c.l}</div><div class="stat-number">${c.n.toLocaleString()}</div><div class="stat-sub">${c.v}</div></div>`).join('');
+}
+
+function renderSources(d){
+  const e=Object.entries(d.source_types).sort((a,b)=>b[1]-a[1]),t=Object.values(d.source_types).reduce((a,b)=>a+b,0)||1;
+  document.getElementById('sourceBars').innerHTML=e.length?e.map(([k,v])=>{const m=SOURCE_META[k]||{e:'📌',l:k};return`<div class="bar-item"><span class="bar-label">${m.e} ${m.l}</span><span class="bar-track"><span class="bar-fill" style="width:${(v/t*100).toFixed(1)}%"></span></span><span class="bar-num">${v}</span></div>`}).join(''):'<div class="empty">暂无数据</div>';
+}
+
+function renderEntities(d){
+  const e=Object.entries(d.entity_types).sort((a,b)=>b[1]-a[1]);
+  document.getElementById('entityTags').innerHTML=e.length?`<div class="tag-cloud">${e.map(([k,v],i)=>`<span class="tag t${i%TAG_COLORS}"><span class="tdot"></span>${ENTITY_EMOJI[k]||''} ${esc(k)}<span class="tcnt">${v}</span></span>`).join('')}</div>`:'<div class="empty">暂无实体</div>';
+}
+
+function renderReviews(d){
+  const items=d.due_reviews.items;
+  document.getElementById('dueBadge').textContent='共 '+d.due_reviews.count+' 项';
+  if(!items.length){document.getElementById('dueReviews').innerHTML='<div class="empty">🎉 暂无待复习</div>';return}
+  document.getElementById('dueReviews').innerHTML=items.map((r,i)=>{
+    const nd=new Date(r.next_review),days=Math.ceil((nd-new Date())/86400000);
+    let bc='urgent',bt='今天';
+    if(days<-3){bc='overdue';bt='已过期'}else if(days<0){bc='urgent';bt='过期'}else if(days>0){bc='';bt=days+'天后'}
+    const hasQA=!!(r.question&&r.answer),qid='q'+i;
+    return`<div class="review-item" ${hasQA?`onclick="document.getElementById('${qid}').style.display=document.getElementById('${qid}').style.display==='none'?'block':'none'"`:''}>
+      <div class="review-head"><span class="review-badge ${bc}">🔔 ${bt}</span><span class="review-name">${esc(r.entity_name)}</span><span class="review-meta">${ENTITY_EMOJI[r.entity_type]||''} ${esc(r.entity_type)} · 间隔${r.interval_days}天</span></div>
+      ${hasQA?`<div class="review-qa" id="${qid}"><div class="rq">🧠 ${esc(r.question)}</div>${r.hint?`<div class="rh">💡 ${esc(r.hint)}</div>`:''}<div class="ra">📝 ${esc(r.answer)}</div></div>`:''}
+    </div>`;
+  }).join('');
+}
+
+function renderStale(d){
+  const items=d.lifecycle?.stale_entities||[];
+  document.getElementById('staleBadge').textContent=items.length?'⚠️ '+items.length+' 个':'✅ 全部新鲜';
+  document.getElementById('stalePanel').innerHTML=items.length?items.map(e=>{let c='ok';if(e.days_stale>180)c='crit';else if(e.days_stale>120)c='warn';return`<div class="stale-item"><span class="stale-days ${c}">${e.days_stale}天</span><span>${esc(e.name)}</span><span style="font-size:0.7rem;color:var(--text-muted);margin-left:auto">${ENTITY_EMOJI[e.type]||''} ${esc(e.type)}</span></div>`}).join(''):'<div class="empty">🌱 所有知识都很新鲜</div>';
+}
+
+function renderRecs(d){
+  const recs=d.recommend?.spotlight||[];
+  document.getElementById('recPanel').innerHTML=recs.length?recs.map(r=>`<div class="rec-card"><span class="rec-source">${esc(r.entity)}</span><span class="rec-type">${esc(r.type)}</span><div class="rec-similar">${r.similar.map(s=>`<span class="rec-sim">${esc(s.name)} · ${(s.similarity*100).toFixed(0)}%</span>`).join('')}</div></div>`).join(''):'<div class="empty">📚 暂无推荐</div>';
+}
+
+function renderTimeline(d){
+  const tl=Object.entries(d.docs_timeline).sort((a,b)=>a[0].localeCompare(b[0]));
+  if(tl.length<2){document.getElementById('timeline').innerHTML='<div class="empty">数据不足</div>';return}
+  const mx=Math.max(...tl.map(e=>e[1]),1);
+  document.getElementById('timeline').innerHTML=tl.map(([date,c])=>`<div class="tbar" style="height:${Math.max(4,(c/mx*100))}%;" title="${date}: ${c}篇"><span class="ttip">${c}</span></div>`).join('')+`<div style="display:flex;justify-content:space-between;font-size:0.64rem;color:var(--text-muted);padding-top:4px;">${tl.map(([d])=>`<span>${d.slice(5)}</span>`).join('')}</div>`;
+}
+
+function renderSystem(d){
+  const s=d.system;
+  document.getElementById('sysInfo').innerHTML=[
+    ['🤖','LLM',s.llm_model],['🧬','Embed',s.embed_model],
+    ['🗄️','SQLite',s.sqlite.split('/').pop()],['🕸️','Graph',s.graph_db.split('/').pop()],
+    ['📦','Vector',s.vector_db.split('/').pop()],['🐛','Debug',s.debug?'开':'关'],
+    ['🕐','更新',fmtDate(d.generated_at)],
+  ].map(i=>`<div class="sys-item"><span class="sys-icon">${i[0]}</span><div><div class="sys-label">${i[1]}</div><div class="sys-val">${esc(i[2])}</div></div></div>`).join('');
+}
+
+loadAll();
+</script>
+</body>
+</html>

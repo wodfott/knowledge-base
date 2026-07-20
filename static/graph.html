@@ -1,0 +1,762 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>知识图谱 — Personal Knowledge Management</title>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<style>
+  /* ===== Reset & Variables ===== */
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --primary:        hsl(162, 45%, 32%);
+    --primary-light:  hsl(162, 45%, 42%);
+    --primary-soft:   hsl(162, 45%, 94%);
+    --primary-pale:   hsl(162, 40%, 88%);
+    --grad-start:     hsl(162, 58%, 41%);
+    --grad-end:       hsl(162, 42%, 26%);
+    --bg:             hsl(195, 20%, 96%);
+    --bg-alt:         hsl(195, 18%, 93%);
+    --card:           hsl(0, 0%, 100%);
+    --border:         hsl(195, 15%, 87%);
+    --text:           hsl(195, 20%, 14%);
+    --text-secondary: hsl(195, 12%, 44%);
+    --text-muted:     hsl(195, 10%, 62%);
+    --orange:         hsl(24, 95%, 53%);
+    --orange-soft:    hsl(24, 95%, 93%);
+    --red:            hsl(0, 72%, 52%);
+    --blue:           hsl(210, 80%, 54%);
+    --purple:         hsl(270, 60%, 55%);
+    --radius:         14px;
+    --radius-sm:      10px;
+    --shadow:         0 1px 3px hsl(195 15% 75% / 0.25), 0 4px 16px hsl(195 10% 60% / 0.08);
+    --transition:     0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  html { font-size: 15px; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg); color: var(--text); overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ===== Header Bar ===== */
+  #header {
+    height: 50px; background: linear-gradient(135deg, var(--grad-start), var(--grad-end));
+    color: #fff; display: flex; align-items: center; justify-content: space-between;
+    padding: 0 22px; box-shadow: 0 2px 12px hsl(162 45% 20% / 0.2); z-index: 10; position: relative;
+  }
+  #header .h-left { display: flex; align-items: center; gap: 10px; }
+  #header .h-logo { font-size: 1.2rem; }
+  #header h1 { font-size: 1rem; font-weight: 700; letter-spacing: -0.3px; }
+  #header .h-actions { display: flex; gap: 8px; }
+  #header .h-btn {
+    background: hsl(0 0% 100% / 0.12); border: 1px solid hsl(0 0% 100% / 0.18);
+    color: #fff; padding: 5px 14px; border-radius: 7px; cursor: pointer;
+    font-size: 0.78rem; font-weight: 500; transition: var(--transition); text-decoration: none;
+  }
+  #header .h-btn:hover { background: hsl(0 0% 100% / 0.22); }
+
+  /* ===== Layout ===== */
+  #app { display: flex; height: calc(100vh - 50px); }
+
+  /* ===== Sidebar ===== */
+  #sidebar {
+    width: 320px; background: var(--card); border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; box-shadow: 2px 0 16px hsl(0 0% 0% / 0.04); z-index: 5;
+  }
+  #sidebar .s-section { padding: 16px 18px; }
+  #sidebar .s-section + .s-section { border-top: 1px solid var(--border); }
+
+  .s-label { font-size: 0.70rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-muted); margin-bottom: 8px; }
+
+  /* Search */
+  #searchBox {
+    width: 100%; padding: 10px 14px; border: 1.5px solid var(--border); border-radius: 10px;
+    font-size: 0.87rem; font-family: inherit; background: var(--bg); color: var(--text);
+    outline: none; transition: var(--transition);
+  }
+  #searchBox:focus { border-color: var(--primary); box-shadow: 0 0 0 3px hsl(162, 45%, 90%); background: var(--card); }
+  #searchBox::placeholder { color: var(--text-muted); }
+
+  /* Results */
+  #results { flex: 1; overflow-y: auto; padding: 0 18px 12px; }
+  #results::-webkit-scrollbar { width: 4px; }
+  #results::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+  .result-item {
+    padding: 10px 13px; margin: 3px 0; border-radius: 10px; cursor: pointer;
+    transition: var(--transition); border: 1px solid transparent;
+  }
+  .result-item:hover { background: var(--primary-soft); border-color: var(--primary-pale); }
+  .result-item.active { background: var(--primary-soft); border-color: var(--primary); }
+  .result-item .ri-name { font-weight: 700; font-size: 0.87rem; color: var(--primary); }
+  .result-item .ri-type {
+    font-size: 0.72rem; color: var(--text-muted); margin-top: 1px;
+    display: flex; align-items: center; gap: 5px;
+  }
+  .result-item .ri-type .ri-dot { width: 7px; height: 7px; border-radius: 50%; }
+
+  /* Stats bar */
+  #stats {
+    font-size: 0.73rem; color: var(--text-muted); padding: 10px 18px;
+    border-top: 1px solid var(--border); display: flex; justify-content: space-between;
+    background: var(--bg-alt);
+  }
+  #stats span { font-weight: 600; color: var(--text-secondary); }
+
+  /* Detail panel */
+  #detail { padding: 8px 18px 16px; border-top: 1px solid var(--border); max-height: 280px; overflow-y: auto; }
+  #detail h3 { font-size: 0.95rem; color: var(--primary); margin-bottom: 6px; display: flex; align-items: center; gap: 6px; }
+  #detail .d-desc { font-size: 0.80rem; color: var(--text-secondary); margin-bottom: 12px; line-height: 1.5; }
+  #detail .d-section-label { font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); margin: 10px 0 6px; }
+  .rel-item {
+    display: flex; align-items: center; gap: 8px; padding: 7px 10px; margin: 3px 0;
+    border-radius: 8px; background: var(--bg-alt); font-size: 0.80rem; cursor: pointer;
+    transition: var(--transition);
+  }
+  .rel-item:hover { background: var(--primary-soft); }
+  .rel-item .rel-type {
+    font-size: 0.65rem; font-weight: 700; text-transform: uppercase;
+    padding: 2px 7px; border-radius: 4px; background: var(--primary-pale);
+    color: var(--primary); flex-shrink: 0;
+  }
+  .rel-item .rel-names { flex: 1; min-width: 0; }
+  .rel-item .rel-names .rel-arrow { color: var(--text-muted); margin: 0 4px; }
+  .rel-item .rel-conf {
+    font-size: 0.65rem; color: var(--text-muted); flex-shrink: 0;
+  }
+
+  #detail .d-empty { text-align: center; padding: 20px; color: var(--text-muted); font-size: 0.82rem; }
+
+  /* ===== Graph Area ===== */
+  #graph { flex: 1; position: relative; background: radial-gradient(ellipse at center, hsl(195, 25%, 97%) 0%, hsl(195, 18%, 93%) 100%); }
+  #graph svg { width: 100%; height: 100%; }
+
+  /* Graph elements */
+  .link {
+    stroke: hsl(195, 12%, 75%); stroke-width: 1.2; stroke-opacity: 0.5;
+    transition: stroke-opacity 0.2s;
+  }
+  .link.highlighted { stroke: var(--primary); stroke-opacity: 0.7; stroke-width: 1.8; }
+
+  .link-label {
+    font-size: 9px; fill: var(--text-muted); pointer-events: none;
+    text-anchor: middle; font-weight: 500;
+  }
+
+  .node circle {
+    stroke-width: 3; cursor: pointer; transition: r 0.2s, stroke-width 0.2s, filter 0.2s;
+    filter: drop-shadow(0 2px 4px hsl(0 0% 0% / 0.12));
+  }
+  .node circle:hover { stroke-width: 4; filter: drop-shadow(0 3px 8px hsl(0 0% 0% / 0.20)); }
+  .node circle.root-node { stroke-width: 4; stroke-dasharray: none; filter: drop-shadow(0 3px 10px hsl(162 45% 32% / 0.35)); }
+
+  .node text {
+    font-size: 10.5px; fill: var(--text); pointer-events: none;
+    text-anchor: middle; font-weight: 500;
+    text-shadow: 0 1px 3px hsl(0 0% 100% / 0.7);
+  }
+  .node text.root-label { font-weight: 700; font-size: 11.5px; fill: var(--primary); }
+
+  /* Tooltip */
+  .graph-tooltip {
+    position: absolute; padding: 10px 14px; background: var(--card);
+    border: 1px solid var(--border); border-radius: 12px; pointer-events: none;
+    font-size: 0.80rem; box-shadow: 0 4px 20px hsl(0 0% 0% / 0.10);
+    z-index: 100; max-width: 220px; line-height: 1.4;
+  }
+  .graph-tooltip .tt-name { font-weight: 700; color: var(--primary); }
+  .graph-tooltip .tt-type { font-size: 0.70rem; color: var(--text-muted); }
+
+  /* Zoom controls */
+  #zoomControls {
+    position: absolute; bottom: 20px; right: 20px; display: flex; flex-direction: column; gap: 4px;
+  }
+  #zoomControls button {
+    width: 34px; height: 34px; border: 1px solid var(--border); border-radius: 8px;
+    background: var(--card); color: var(--text); font-size: 1.1rem; cursor: pointer;
+    transition: var(--transition); display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 1px 3px hsl(0 0% 0% / 0.05);
+  }
+  #zoomControls button:hover { background: var(--primary-soft); border-color: var(--primary); color: var(--primary); }
+
+  /* Legend */
+  #legend {
+    position: absolute; bottom: 20px; left: 20px;
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 12px 16px; box-shadow: 0 2px 12px hsl(0 0% 0% / 0.05);
+    display: flex; flex-wrap: wrap; gap: 8px; max-width: 360px;
+  }
+  .legend-item { display: flex; align-items: center; gap: 5px; font-size: 0.70rem; font-weight: 500; color: var(--text-secondary); }
+  .legend-item .lg-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+
+  /* Empty / loading */
+  .graph-placeholder {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    text-align: center; color: var(--text-muted);
+  }
+  .graph-placeholder .gp-icon { font-size: 3rem; margin-bottom: 12px; }
+  .graph-placeholder p { font-size: 0.87rem; }
+</style>
+</head>
+<body>
+
+<!-- ===== Header ===== -->
+<div id="header">
+  <div class="h-left">
+    <span class="h-logo">🕸️</span>
+    <h1>知识图谱可视化</h1>
+  </div>
+  <div class="h-actions">
+    <button class="h-btn" onclick="refreshGraph()">🔄 刷新</button>
+    <button class="h-btn" onclick="loadFullGraph()" id="btnFull">🌐 显示全部</button>
+    <a href="/admin" class="h-btn">📊 管理后台</a>
+  </div>
+</div>
+
+<!-- ===== App ===== -->
+<div id="app">
+  <!-- Sidebar -->
+  <div id="sidebar">
+    <div class="s-section">
+      <div class="s-label">🔍 搜索实体</div>
+      <input id="searchBox" placeholder="输入实体名称搜索…" autofocus />
+    </div>
+    <div id="results"></div>
+    <div id="detail"><div class="d-empty">👈 搜索或点击节点查看详情</div></div>
+    <div id="stats"><span>🟢 在线</span> · <span id="statsNodes">—</span> 节点 · <span id="statsLinks">—</span> 关系</div>
+  </div>
+
+  <!-- Graph -->
+  <div id="graph">
+    <svg></svg>
+    <div class="graph-placeholder" id="graphPlaceholder">
+      <div class="gp-icon">🕸️</div>
+      <p>搜索实体开始探索知识图谱</p>
+    </div>
+    <div id="zoomControls">
+      <button onclick="zoomIn()" title="放大">+</button>
+      <button onclick="zoomOut()" title="缩小">−</button>
+      <button onclick="zoomFit()" title="适应窗口">⊡</button>
+    </div>
+    <div id="legend"></div>
+  </div>
+</div>
+
+<script>
+// ===== Constants =====
+const API = '/api';
+
+const TYPE_COLORS = {
+  "Person":       { fill: "#f97316", soft: "#fff7ed" },
+  "Organization": { fill: "#8b5cf6", soft: "#f5f3ff" },
+  "Technology":   { fill: "#06b6d4", soft: "#ecfeff" },
+  "Concept":      { fill: "#10b981", soft: "#ecfdf5" },
+  "Tool":         { fill: "#eab308", soft: "#fefce8" },
+  "Framework":    { fill: "#3b82f6", soft: "#eff6ff" },
+  "Language":     { fill: "#ec4899", soft: "#fdf2f8" },
+  "Platform":     { fill: "#6366f1", soft: "#eef2ff" },
+  "Product":      { fill: "#14b8a6", soft: "#f0fdfa" },
+  "Methodology":  { fill: "#f43f5e", soft: "#fff1f2" },
+  "Event":        { fill: "#84cc16", soft: "#f7fee7" },
+  "Location":     { fill: "#a855f7", soft: "#faf5ff" },
+  "Other":        { fill: "#64748b", soft: "#f8fafc" },
+};
+
+// ===== State =====
+let currentEntity = null;
+let currentRootId = null;
+let graphData = { nodes: [], links: [] };
+let simulation;
+let currentZoom = null;
+
+// ===== D3 Setup =====
+const svg = d3.select('#graph svg');
+const g = svg.append('g');
+const zoom = d3.zoom()
+  .scaleExtent([0.08, 6])
+  .on('zoom', (e) => {
+    g.attr('transform', e.transform);
+    currentZoom = e.transform;
+  });
+svg.call(zoom);
+
+// ===== API =====
+async function searchEntities(q) {
+  const r = await fetch(`${API}/graph/search?q=${encodeURIComponent(q)}&limit=15`);
+  return (await r.json()).entities || [];
+}
+
+async function queryEntity(name) {
+  const r = await fetch(`${API}/graph/query`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ entity_name: name, max_depth: 2 }),
+  });
+  return await r.json();
+}
+
+// ===== Graph Building =====
+function buildGraph(entityResult) {
+  const nodes = [], links = [];
+  const seen = new Set();
+
+  const addNode = (e) => {
+    if (!seen.has(e.id)) {
+      seen.add(e.id);
+      nodes.push({
+        id: e.id,
+        name: e.name || '(unnamed)',
+        type: e.type || 'Other',
+        group: e.type || 'Other',
+        isRoot: false,
+      });
+    }
+  };
+
+  if (entityResult.entity) {
+    const root = entityResult.entity;
+    addNode(root);
+    // Mark root
+    nodes[nodes.length - 1].isRoot = true;
+    currentRootId = root.id;
+
+    (entityResult.neighbors || []).forEach(n => {
+      addNode(n);
+      (n.relations || []).forEach(r => {
+        const sourceName = r.source_name;
+        const targetName = r.target_name;
+        const sourceNode = nodes.find(nd => nd.name === sourceName);
+        const targetNode = nodes.find(nd => nd.name === targetName);
+        if (sourceNode && targetNode) {
+          links.push({
+            source: sourceNode.id,
+            target: targetNode.id,
+            type: r.relation_type,
+            confidence: r.confidence || 1.0,
+          });
+        }
+      });
+    });
+  }
+  return { nodes, links };
+}
+
+// ===== Graph Rendering =====
+function renderGraph(data) {
+  const container = document.getElementById('graph');
+  const width = container.clientWidth, height = container.clientHeight;
+
+  document.getElementById('graphPlaceholder').style.display = data.nodes.length ? 'none' : '';
+
+  // Update legend
+  const types = [...new Set(data.nodes.map(n => n.type))];
+  document.getElementById('legend').innerHTML = types.map(t => {
+    const c = TYPE_COLORS[t] || TYPE_COLORS['Other'];
+    return `<span class="legend-item"><span class="lg-dot" style="background:${c.fill}"></span>${t}</span>`;
+  }).join('');
+
+  svg.selectAll('g > *').remove();
+
+  if (simulation) simulation.stop();
+  if (!data.nodes.length) return;
+
+  // Find color for link type — use root entity type color
+  const linkColor = (d) => {
+    return d.type ? 'hsl(162, 30%, 70%)' : 'hsl(195, 12%, 75%)';
+  };
+
+  const link = g.append('g').selectAll('line')
+    .data(data.links).join('line')
+    .attr('class', 'link');
+
+  const linkLabel = g.append('g').selectAll('text')
+    .data(data.links).join('text')
+    .attr('class', 'link-label')
+    .text(d => d.type);
+
+  const node = g.append('g').selectAll('.node')
+    .data(data.nodes).join('g')
+    .attr('class', 'node')
+    .call(d3.drag()
+      .on('start', (e, d) => {
+        if (!e.active) simulation.alphaTarget(0.3).restart();
+        d.fx = d.x; d.fy = d.y;
+      })
+      .on('drag', (e, d) => { d.fx = e.x; d.fy = e.y; })
+      .on('end', (e, d) => {
+        if (!e.active) simulation.alphaTarget(0);
+        d.fx = null; d.fy = null;
+      })
+    );
+
+  // Circles
+  node.append('circle')
+    .attr('r', d => d.isRoot ? 22 : 13)
+    .attr('fill', d => {
+      const c = TYPE_COLORS[d.type] || TYPE_COLORS['Other'];
+      return c.fill;
+    })
+    .attr('class', d => d.isRoot ? 'root-node' : '')
+    .attr('stroke', d => {
+      const c = TYPE_COLORS[d.type] || TYPE_COLORS['Other'];
+      return d.isRoot ? 'hsl(162, 45%, 32%)' : c.fill;
+    })
+    .style('stroke-opacity', d => d.isRoot ? 1 : 0.35)
+    .on('click', (e, d) => {
+      e.stopPropagation();
+      loadEntity(d.name);
+    })
+    .on('mouseenter', (e, d) => {
+      // Highlight connected links
+      link
+        .attr('class', l =>
+          (l.source.id === d.id || l.target.id === d.id) ? 'link highlighted' : 'link'
+        );
+
+      // Tooltip
+      const tip = d3.select('#graph').append('div').attr('class', 'graph-tooltip');
+      const c = TYPE_COLORS[d.type] || TYPE_COLORS['Other'];
+      tip.html(`<div class="tt-name" style="color:${c.fill}">${escHtml(d.name)}</div><div class="tt-type">${d.type}</div>`);
+      const rect = tip.node().getBoundingClientRect();
+      const x = e.pageX + 14, y = e.pageY - 14;
+      tip.style('left', (x + rect.width > window.innerWidth ? e.pageX - rect.width - 14 : x) + 'px')
+         .style('top', (y - rect.height < 0 ? e.pageY + 14 : y) + 'px');
+    })
+    .on('mousemove', (e, d) => {
+      const tip = d3.select('.graph-tooltip');
+      if (tip.empty()) return;
+      const rect = tip.node().getBoundingClientRect();
+      const x = e.pageX + 14, y = e.pageY - 14;
+      tip.style('left', (x + rect.width > window.innerWidth ? e.pageX - rect.width - 14 : x) + 'px')
+         .style('top', (y - rect.height < 0 ? e.pageY + 14 : y) + 'px');
+    })
+    .on('mouseleave', () => {
+      link.attr('class', 'link');
+      d3.selectAll('.graph-tooltip').remove();
+    });
+
+  // Labels
+  node.append('text')
+    .text(d => d.name.length > 10 ? d.name.slice(0, 10) + '…' : d.name)
+    .attr('dy', d => d.isRoot ? 34 : 24)
+    .attr('class', d => d.isRoot ? 'root-label' : '');
+
+  // Forces
+  simulation = d3.forceSimulation(data.nodes)
+    .force('link', d3.forceLink(data.links).id(d => d.id).distance(140))
+    .force('charge', d3.forceManyBody().strength(-500))
+    .force('center', d3.forceCenter(width / 2, height / 2))
+    .force('collision', d3.forceCollide(45))
+    .force('x', d3.forceX(width / 2).strength(0.03))
+    .force('y', d3.forceY(height / 2).strength(0.03));
+
+  simulation.on('tick', () => {
+    link
+      .attr('x1', d => d.source.x).attr('y1', d => d.source.y)
+      .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
+    linkLabel
+      .attr('x', d => (d.source.x + d.target.x) / 2)
+      .attr('y', d => (d.source.y + d.target.y) / 2 - 6);
+    node.attr('transform', d => `translate(${d.x},${d.y})`);
+  });
+
+  // Auto-pan to root
+  const rootNode = data.nodes.find(n => n.isRoot);
+  if (rootNode) {
+    setTimeout(() => {
+      const tx = width / 2 - rootNode.x * 1.5;
+      const ty = height / 2 - rootNode.y * 1.5;
+      svg.transition().duration(600).call(zoom.transform, d3.zoomIdentity.translate(tx, ty).scale(1.4));
+    }, 500);
+  }
+}
+
+// ===== Entity Loading =====
+async function loadEntity(name) {
+  // Highlight active in sidebar
+  document.querySelectorAll('.result-item').forEach(el => el.classList.remove('active'));
+  const match = document.querySelector(`.result-item[data-name="${CSS.escape(name)}"]`);
+  if (match) match.classList.add('active');
+
+  const r = await queryEntity(name);
+  currentEntity = r.entity;
+  const data = buildGraph(r);
+  graphData = data;
+  renderGraph(data);
+
+  // Stats
+  document.getElementById('statsNodes').textContent = data.nodes.length;
+  document.getElementById('statsLinks').textContent = data.links.length;
+
+  // Detail panel
+  if (!currentEntity) {
+    document.getElementById('detail').innerHTML = '<div class="d-empty">未找到实体</div>';
+    return;
+  }
+
+  const e = currentEntity;
+  const ec = TYPE_COLORS[e.type] || TYPE_COLORS['Other'];
+  let html = `<h3><span style="display:inline-block;width:11px;height:11px;border-radius:50%;background:${ec.fill};flex-shrink:0;"></span> ${escHtml(e.name)}</h3>`;
+  html += `<div class="d-label" style="font-size:0.72rem;color:var(--text-muted);margin-bottom:8px;">${e.type} · 置信度 ${(e.confidence*100).toFixed(0)}%</div>`;
+  if (e.description) html += `<div class="d-desc">${escHtml(e.description)}</div>`;
+
+  if (e.relations && e.relations.length) {
+    html += '<div class="d-section-label">🔗 关系</div>';
+    e.relations.slice(0, 8).forEach(r => {
+      html += `<div class="rel-item" onclick="loadEntity('${escHtml(r.target_name === e.name ? r.source_name : r.target_name)}')">
+        <span class="rel-type">${escHtml(r.relation_type)}</span>
+        <span class="rel-names">${escHtml(r.source_name)} <span class="rel-arrow">→</span> ${escHtml(r.target_name)}</span>
+        <span class="rel-conf">${(r.confidence*100).toFixed(0)}%</span>
+      </div>`;
+    });
+  }
+
+  document.getElementById('detail').innerHTML = html;
+}
+
+// ===== Search =====
+let searchTimer;
+document.getElementById('searchBox').addEventListener('input', (e) => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(async () => {
+    const q = e.target.value.trim();
+    if (!q) {
+      document.getElementById('results').innerHTML = '';
+      return;
+    }
+    const entities = await searchEntities(q);
+    document.getElementById('results').innerHTML = entities.map(en => {
+      const c = TYPE_COLORS[en.type] || TYPE_COLORS['Other'];
+      return `<div class="result-item" data-name="${escHtml(en.name)}" onclick="loadEntity('${escHtml(en.name)}')">
+        <div class="ri-name">${escHtml(en.name)}</div>
+        <div class="ri-type"><span class="ri-dot" style="background:${c.fill}"></span>${en.type}${en.description ? ' · ' + escHtml(en.description.slice(0,30)) : ''}</div>
+      </div>`;
+    }).join('');
+  }, 250);
+});
+
+// ===== Zoom Controls =====
+function zoomIn() {
+  svg.transition().duration(300).call(zoom.scaleBy, 1.4);
+}
+function zoomOut() {
+  svg.transition().duration(300).call(zoom.scaleBy, 0.7);
+}
+function zoomFit() {
+  svg.transition().duration(500).call(zoom.transform, d3.zoomIdentity);
+}
+
+// Click background to deselect
+d3.select('#graph').on('click', () => {
+  d3.selectAll('.link').attr('class', 'link');
+});
+
+// ===== Refresh =====
+async function refreshGraph() {
+  const btn = document.querySelector('.h-btn');
+  try {
+    const h = await fetch('/api/health').then(r => r.json());
+    const s = h.stats;
+    // If showing full graph, reload it
+    if (document.getElementById('btnFull').textContent.includes('加载')) {
+      loadFullGraph();
+    } else if (currentEntity) {
+      loadEntity(currentEntity.name);
+    } else {
+      loadFullGraph();
+    }
+    document.getElementById('statsNodes').textContent = s.entities;
+    document.getElementById('statsLinks').textContent = s.relations;
+  } catch(e) {
+    // Fallback: just reload full graph
+    loadFullGraph();
+  }
+}
+
+// ===== Helpers =====
+function escHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+// ===== Full Graph =====
+async function loadFullGraph() {
+  document.getElementById('btnFull').textContent = '⏳ 加载中...';
+  document.getElementById('btnFull').disabled = true;
+  document.getElementById('graphPlaceholder').style.display = 'none';
+
+  try {
+    const r = await fetch(`${API}/graph/full`);
+    const data = await r.json();
+    renderFullGraph(data);
+    document.getElementById('statsNodes').textContent = data.nodes.length;
+    document.getElementById('statsLinks').textContent = data.links.length;
+    document.getElementById('detail').innerHTML =
+      `<div style="padding:12px;color:var(--primary);font-weight:600;">🌐 全图概览</div>
+       <div style="padding:0 12px;font-size:0.82rem;color:var(--text-secondary);">
+         ${data.counts.total_entities} 个实体 · ${data.counts.total_relations} 条关系<br>
+         <span style="font-size:0.72rem;color:var(--text-muted);">显示前 ${data.counts.shown_entities} 个实体</span>
+       </div>`;
+  } catch (err) {
+    alert('加载全图失败: ' + err.message);
+  } finally {
+    document.getElementById('btnFull').textContent = '🌐 显示全部';
+    document.getElementById('btnFull').disabled = false;
+  }
+}
+
+function renderFullGraph(data) {
+  const container = document.getElementById('graph');
+  const width = container.clientWidth, height = container.clientHeight;
+
+  svg.selectAll('g > *').remove();
+  if (simulation) simulation.stop();
+  currentEntity = null;
+  currentRootId = null;
+  graphData = data;
+
+  // Build the graph data for D3
+  const nodes = data.nodes.map(n => ({...n}));
+  const nodeMap = {};
+  nodes.forEach(n => { nodeMap[n.id] = n; });
+
+  const links = data.links
+    .filter(l => nodeMap[l.source] && nodeMap[l.target])
+    .map(l => ({
+      source: l.source,
+      target: l.target,
+      type: l.type,
+      confidence: l.confidence,
+    }));
+
+  if (!nodes.length) {
+    document.getElementById('graphPlaceholder').style.display = '';
+    return;
+  }
+
+  // Update legend
+  const types = [...new Set(nodes.map(n => n.type))];
+  document.getElementById('legend').innerHTML = types.slice(0, 12).map(t => {
+    const c = TYPE_COLORS[t] || TYPE_COLORS['Other'];
+    return `<span class="legend-item"><span class="lg-dot" style="background:${c.fill}"></span>${t}</span>`;
+  }).join('');
+
+  const link = g.append('g').selectAll('line')
+    .data(links).join('line')
+    .attr('class', 'link')
+    .attr('stroke-opacity', 0.25);
+
+  const node = g.append('g').selectAll('.node')
+    .data(nodes).join('g')
+    .attr('class', 'node')
+    .call(d3.drag()
+      .on('start', (e, d) => {
+        if (!e.active) simulation.alphaTarget(0.3).restart();
+        d.fx = d.x; d.fy = d.y;
+      })
+      .on('drag', (e, d) => { d.fx = e.x; d.fy = e.y; })
+      .on('end', (e, d) => {
+        if (!e.active) simulation.alphaTarget(0);
+        d.fx = null; d.fy = null;
+      })
+    );
+
+  node.append('circle')
+    .attr('r', d => 4 + (d.type === 'Technology' || d.type === 'Framework' ? 3 : 0))
+    .attr('fill', d => {
+      const c = TYPE_COLORS[d.type] || TYPE_COLORS['Other'];
+      return c.fill;
+    })
+    .attr('stroke', d => {
+      const c = TYPE_COLORS[d.type] || TYPE_COLORS['Other'];
+      return c.fill;
+    })
+    .attr('stroke-opacity', 0.4)
+    .attr('stroke-width', 1.5)
+    .on('click', (e, d) => {
+      e.stopPropagation();
+      loadEntity(d.name);
+    })
+    .on('mouseenter', (e, d) => {
+      link.attr('class', l =>
+        (l.source.id === d.id || l.target.id === d.id) ? 'link highlighted' : 'link'
+      );
+      const tip = d3.select('#graph').append('div').attr('class', 'graph-tooltip');
+      const c = TYPE_COLORS[d.type] || TYPE_COLORS['Other'];
+      tip.html(`<div class="tt-name" style="color:${c.fill}">${escHtml(d.name)}</div><div class="tt-type">${d.type}</div>`);
+      const rect = tip.node().getBoundingClientRect();
+      const x = e.pageX + 14, y = e.pageY - 14;
+      tip.style('left', (x + rect.width > window.innerWidth ? e.pageX - rect.width - 14 : x) + 'px')
+         .style('top', (y - rect.height < 0 ? e.pageY + 14 : y) + 'px');
+    })
+    .on('mousemove', (e) => {
+      const tip = d3.select('.graph-tooltip');
+      if (tip.empty()) return;
+      const rect = tip.node().getBoundingClientRect();
+      const x = e.pageX + 14, y = e.pageY - 14;
+      tip.style('left', (x + rect.width > window.innerWidth ? e.pageX - rect.width - 14 : x) + 'px')
+         .style('top', (y - rect.height < 0 ? e.pageY + 14 : y) + 'px');
+    })
+    .on('mouseleave', () => {
+      link.attr('class', 'link');
+      d3.selectAll('.graph-tooltip').remove();
+    });
+
+  // Small labels for overview
+  node.append('text')
+    .text(d => d.name.length > 6 ? d.name.slice(0, 6) : d.name)
+    .attr('dy', d => 4 + (d.type === 'Technology' || d.type === 'Framework' ? 3 : 0) + 11)
+    .attr('text-anchor', 'middle')
+    .attr('font-size', '8px')
+    .attr('fill', 'var(--text-muted)');
+
+  simulation = d3.forceSimulation(nodes)
+    .force('link', d3.forceLink(links).id(d => d.id).distance(60))
+    .force('charge', d3.forceManyBody().strength(-120))
+    .force('center', d3.forceCenter(width / 2, height / 2))
+    .force('collision', d3.forceCollide(12));
+
+  simulation.on('tick', () => {
+    link
+      .attr('x1', d => d.source.x).attr('y1', d => d.source.y)
+      .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
+    node.attr('transform', d => `translate(${d.x},${d.y})`);
+  });
+
+  // Auto-zoom to fit
+  setTimeout(() => {
+    svg.transition().duration(800).call(zoom.transform, d3.zoomIdentity.translate(width/2, height/2).scale(0.7));
+  }, 1000);
+}
+
+// ===== Init =====
+(async () => {
+  const params = new URLSearchParams(window.location.search);
+  const entityParam = params.get('entity');
+  if (entityParam) {
+    loadEntity(entityParam);
+    return;
+  }
+  // Default: load full graph overview
+  const r = await fetch(`${API}/graph/search?q=&limit=100`);
+  const entities = (await r.json()).entities || [];
+  if (entities.length === 0) return;
+  // Pick a diverse set for the initial view
+  const types = [...new Set(entities.map(e => e.type))];
+  const diverse = [];
+  const seenTypes = new Set();
+  for (const e of entities) {
+    if (!seenTypes.has(e.type) || diverse.length < 8) {
+      diverse.push(e);
+      seenTypes.add(e.type);
+    }
+  }
+  // Load a central entity that likely has relations
+  const center = entities.find(e => e.name === 'Docker') ||
+                 entities.find(e => e.name === 'React') ||
+                 entities.find(e => e.name === '飞书') ||
+                 entities[0];
+  if (center) loadEntity(center.name);
+})();
+</script>
+</body>
+</html>

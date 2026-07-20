@@ -65,10 +65,17 @@ class GraphDB:
         return None
 
     def find_entity_by_name(self, name: str) -> Optional[dict]:
-        """Find entity by name (case-insensitive)."""
-        name_lower = name.lower()
+        """Find entity by name (case-insensitive exact match, then partial fallback)."""
+        name_lower = name.lower().strip()
+        # 1. Exact match
         for node_id, data in self._graph.nodes(data=True):
             if data.get("name", "").lower() == name_lower:
+                result = dict(data)
+                result["id"] = node_id
+                return result
+        # 2. Partial match (entity name contains query)
+        for node_id, data in self._graph.nodes(data=True):
+            if name_lower in data.get("name", "").lower():
                 result = dict(data)
                 result["id"] = node_id
                 return result
@@ -76,6 +83,19 @@ class GraphDB:
 
     def has_entity(self, entity_id: str) -> bool:
         return entity_id in self._graph.nodes
+
+    def remove_entity(self, entity_id: str) -> bool:
+        """Remove an entity and all its connected edges."""
+        if entity_id not in self._graph.nodes:
+            return False
+        self._graph.remove_node(entity_id)
+        self._save()
+        return True
+
+    def clear(self):
+        """Remove all entities and relations."""
+        self._graph.clear()
+        self._save()
 
     # --- Edge operations ---
     def add_relation(

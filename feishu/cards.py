@@ -173,45 +173,80 @@ def qa_card(question: str, answer: str, sources: list[dict]) -> dict:
     }
 
 
-def review_card(entity_name: str, relations: list[str], related_docs: list[str]) -> dict:
-    """Build a Feishu card for daily review."""
+def review_card(
+    entity_name: str,
+    question: str = "",
+    answer: str = "",
+    hint: str = "",
+    entity_type: str = "",
+    interval_days: int = 1,
+    repetitions: int = 0,
+) -> dict:
+    """Build a Feishu card for spaced-repetition review (Anki style)."""
     elements = []
 
-    # Entity
+    # Front: question
+    if question:
+        elements.append({
+            "tag": "div",
+            "text": {
+                "tag": "lark_md",
+                "content": f"**🧠 回想一下**\n\n{question[:300]}",
+            },
+        })
+    else:
+        elements.append({
+            "tag": "div",
+            "text": {
+                "tag": "lark_md",
+                "content": f"**📌 {entity_name}** [{entity_type}]\n回忆一下这个知识点...",
+            },
+        })
+
+    # Hint (collapsible hint)
+    if hint:
+        elements.append({
+            "tag": "div",
+            "text": {
+                "tag": "lark_md",
+                "content": f"💡 *提示: {hint[:80]}*",
+            },
+        })
+
+    elements.append({"tag": "hr"})
+
+    # Back: answer
+    if answer:
+        elements.append({
+            "tag": "div",
+            "text": {
+                "tag": "lark_md",
+                "content": f"**📝 答案**\n\n{answer[:500]}",
+            },
+        })
+    else:
+        # Fallback: show entity description from graph
+        from storage.graph_db import graph_db
+        entity = graph_db.find_entity_by_name(entity_name)
+        if entity and entity.get("description"):
+            elements.append({
+                "tag": "div",
+                "text": {
+                    "tag": "lark_md",
+                    "content": f"📝 {entity['description'][:300]}",
+                },
+            })
+
+    elements.append({"tag": "hr"})
+
+    # Stats
     elements.append({
         "tag": "div",
         "text": {
             "tag": "lark_md",
-            "content": f"**📌 {entity_name}**\n回忆一下这个知识点...",
+            "content": f"📊 间隔: {interval_days}天 · 复习次数: {repetitions} · 类型: {entity_type}",
         },
     })
-    elements.append({"tag": "hr"})
-
-    # Relations (hidden, like Anki back)
-    if relations:
-        rel_lines = ["**核心关系:**"]
-        for r in relations[:3]:
-            rel_lines.append(f"• {r}")
-        elements.append({
-            "tag": "div",
-            "text": {
-                "tag": "lark_md",
-                "content": "\n".join(rel_lines),
-            },
-        })
-
-    if related_docs:
-        elements.append({"tag": "hr"})
-        doc_lines = ["**相关文档:**"]
-        for d in related_docs[:3]:
-            doc_lines.append(f"• {d}")
-        elements.append({
-            "tag": "div",
-            "text": {
-                "tag": "lark_md",
-                "content": "\n".join(doc_lines),
-            },
-        })
 
     # Review actions
     elements.append({
@@ -219,20 +254,20 @@ def review_card(entity_name: str, relations: list[str], related_docs: list[str])
         "actions": [
             {
                 "tag": "button",
-                "text": {"tag": "plain_text", "content": "✅ 简单"},
+                "text": {"tag": "plain_text", "content": "✅ 简单 (5)"},
                 "type": "primary",
                 "value": json.dumps({"action": "review_easy", "entity": entity_name}),
             },
             {
                 "tag": "button",
-                "text": {"tag": "plain_text", "content": "🤔 困难"},
+                "text": {"tag": "plain_text", "content": "🤔 困难 (3)"},
                 "type": "default",
                 "value": json.dumps({"action": "review_hard", "entity": entity_name}),
             },
             {
                 "tag": "button",
-                "text": {"tag": "plain_text", "content": "⏭️ 跳过"},
-                "type": "default",
+                "text": {"tag": "plain_text", "content": "😰 忘了 (1)"},
+                "type": "danger",
                 "value": json.dumps({"action": "review_skip", "entity": entity_name}),
             },
         ],
@@ -241,7 +276,7 @@ def review_card(entity_name: str, relations: list[str], related_docs: list[str])
     return {
         "config": {"wide_screen_mode": True},
         "header": {
-            "title": {"tag": "plain_text", "content": "📖 今日复习"},
+            "title": {"tag": "plain_text", "content": f"📖 复习: {entity_name}"},
             "template": "orange",
         },
         "elements": elements,

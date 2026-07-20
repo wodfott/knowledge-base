@@ -93,16 +93,56 @@ Text:
     def answer_question(self, question: str, context_chunks: list[str]) -> str:
         """Answer a question based on retrieved context chunks."""
         context_text = "\n\n---\n\n".join(context_chunks)
-        prompt = f"""Answer the question based on the following context. If the context doesn't contain enough information, say so.
+        prompt = f"""Answer the question based on the following knowledge base excerpts. If the knowledge base doesn't contain enough information, say so.
 
-Context:
+Knowledge Base:
 {context_text}
 
 Question: {question}
 
 Provide a concise, accurate answer. Cite specific sources when possible."""
         return self.chat([
-            {"role": "system", "content": "You are a personal knowledge assistant. Answer based only on provided context. Be concise and accurate."},
+            {"role": "system", "content": "You are a personal knowledge assistant. Answer based only on the knowledge base. Never say '上下文' — say '知识库' instead. Be concise and accurate."},
+            {"role": "user", "content": prompt},
+        ])
+
+    def expand_query(self, question: str) -> list[str]:
+        """Expand a query: fix typos, extract key terms, generate search variations."""
+        prompt = f"""The user asked: "{question}"
+
+Your task: generate 3-5 alternative search queries to find relevant documents in a knowledge base. Fix any typos. Extract key concepts. Use different phrasings.
+
+Output as JSON:
+{{"queries": ["corrected query", "alternative phrasing", "keyword list"]}}"""
+        try:
+            result = self.chat_json([
+                {"role": "system", "content": "You are a query expansion engine. Fix typos and generate search variants. Output valid JSON only."},
+                {"role": "user", "content": prompt},
+            ])
+            return result.get("queries", [question])
+        except Exception:
+            return [question]
+
+    def generate_flashcard_qa(self, entity_name: str, entity_type: str, description: str, context: str) -> dict:
+        """Generate a question-answer pair for spaced-repetition flashcard."""
+        prompt = f"""Create a high-quality flashcard for spaced repetition learning.
+
+Entity: {entity_name}
+Type: {entity_type}
+Description: {description}
+
+Context (from knowledge base):
+{context[:2000]}
+
+Generate ONE flashcard with:
+- "front": A challenging question that tests recall of this concept. Make it specific and concrete, not vague. The question should require deep understanding, not just recognition.
+- "back": A concise, informative answer (2-4 sentences) that directly answers the question.
+- "hint": A short clue (one phrase) to help if stuck.
+
+Output as JSON:
+{{"front": "...", "back": "...", "hint": "..."}}"""
+        return self.chat_json([
+            {"role": "system", "content": "You are a expert spaced-repetition flashcard creator. Create cards that promote active recall. Output valid JSON only."},
             {"role": "user", "content": prompt},
         ])
 
